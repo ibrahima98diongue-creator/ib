@@ -5,15 +5,26 @@ import { LinkButton } from "@/components/ui/Button";
 import { InterventionsTable } from "@/components/InterventionsSection";
 import { chantierStatusLabels, priorityLabels } from "@/lib/labels";
 import { formatDate } from "@/lib/format";
+import { PAGE_SIZE, parsePage, skipFor, totalPagesFor } from "@/lib/pagination";
 
-export default async function NettoyagePage() {
+export default async function NettoyagePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
+  const { page: pageParam } = await searchParams;
+  const page = parsePage(pageParam);
   const session = await auth();
-  const [nettoyages, hasSites] = await Promise.all([
+  const where = { site: { companyId: session!.user.companyId } };
+  const [nettoyages, total, hasSites] = await Promise.all([
     prisma.nettoyage.findMany({
-      where: { site: { companyId: session!.user.companyId } },
+      where,
       include: { site: { select: { id: true, name: true } } },
       orderBy: [{ scheduledDate: "asc" }, { title: "asc" }],
+      skip: skipFor(page),
+      take: PAGE_SIZE,
     }),
+    prisma.nettoyage.count({ where }),
     prisma.site.count({ where: { companyId: session!.user.companyId } }),
   ]);
 
@@ -21,7 +32,7 @@ export default async function NettoyagePage() {
     <ListPageShell
       title="Nettoyage"
       description="Les interventions de nettoyage planifiées sur vos sites."
-      count={nettoyages.length}
+      count={total}
       addHref="/nettoyage/nouveau"
       addLabel="+ Ajouter un nettoyage"
       emptyTitle="Aucun nettoyage"
@@ -39,6 +50,9 @@ export default async function NettoyagePage() {
           </LinkButton>
         )
       }
+      page={page}
+      totalPages={totalPagesFor(total)}
+      buildPageHref={(p) => `/nettoyage?page=${p}`}
     >
       <InterventionsTable
         items={nettoyages.map((n) => ({

@@ -6,6 +6,7 @@ import { Table, Thead, Th, Tbody, Td } from "@/components/ui/Table";
 import { DeleteButton } from "@/components/ui/DeleteButton";
 import { deleteMeteo } from "@/lib/actions/meteo";
 import { formatDate } from "@/lib/format";
+import { PAGE_SIZE, parsePage, skipFor, totalPagesFor } from "@/lib/pagination";
 import Link from "next/link";
 
 function formatValue(value: number | null, unit: string) {
@@ -13,14 +14,24 @@ function formatValue(value: number | null, unit: string) {
   return `${value.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} ${unit}`;
 }
 
-export default async function MeteoPage() {
+export default async function MeteoPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
+  const { page: pageParam } = await searchParams;
+  const page = parsePage(pageParam);
   const session = await auth();
-  const [entries, hasSites] = await Promise.all([
+  const where = { site: { companyId: session!.user.companyId } };
+  const [entries, total, hasSites] = await Promise.all([
     prisma.meteo.findMany({
-      where: { site: { companyId: session!.user.companyId } },
+      where,
       include: { site: { select: { id: true, name: true } } },
       orderBy: { date: "desc" },
+      skip: skipFor(page),
+      take: PAGE_SIZE,
     }),
+    prisma.meteo.count({ where }),
     prisma.site.count({ where: { companyId: session!.user.companyId } }),
   ]);
 
@@ -28,7 +39,7 @@ export default async function MeteoPage() {
     <ListPageShell
       title="Météo / Irradiation"
       description="Les relevés météo et d'irradiation de vos sites."
-      count={entries.length}
+      count={total}
       addHref="/meteo/nouveau"
       addLabel="+ Ajouter une donnée météo"
       headerExtra={<LinkButton href="/import-export">Importer</LinkButton>}
@@ -52,6 +63,9 @@ export default async function MeteoPage() {
           </LinkButton>
         )
       }
+      page={page}
+      totalPages={totalPagesFor(total)}
+      buildPageHref={(p) => `/meteo?page=${p}`}
     >
       <Table>
         <Thead>

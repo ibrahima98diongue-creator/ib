@@ -10,36 +10,66 @@ import { ProductionChart } from "@/components/ProductionChart";
 import { deleteProduction } from "@/lib/actions/productions";
 import { startOfDay, startOfWeek, startOfMonth, startOfYear, addDays, toDateParam } from "@/lib/dates";
 import { formatDate, formatDateShort, formatKwh } from "@/lib/format";
+import { PAGE_SIZE, parsePage, skipFor, totalPagesFor } from "@/lib/pagination";
 import Link from "next/link";
 
-export default async function ProductionPage() {
+export default async function ProductionPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
+  const { page: pageParam } = await searchParams;
+  const page = parsePage(pageParam);
   const session = await auth();
   const companyId = session!.user.companyId;
   const today = startOfDay(new Date());
+  const tomorrow = addDays(today, 1);
+  const last30Start = addDays(today, -29);
+  const where = { site: { companyId } };
 
-  const [entries, hasSites] = await Promise.all([
+  // Les totaux et le graphique portent sur toute la période concernée
+  // (pas seulement la page affichée) : calculés via des requêtes dédiées,
+  // pas en filtrant en mémoire le tableau paginé.
+  const [todayAgg, weekAgg, monthAgg, yearAgg, chartRows, entries, total, hasSites] = await Promise.all([
+    prisma.production.aggregate({
+      where: { ...where, date: { gte: today, lt: tomorrow } },
+      _sum: { energyKwh: true },
+    }),
+    prisma.production.aggregate({
+      where: { ...where, date: { gte: startOfWeek(today) } },
+      _sum: { energyKwh: true },
+    }),
+    prisma.production.aggregate({
+      where: { ...where, date: { gte: startOfMonth(today) } },
+      _sum: { energyKwh: true },
+    }),
+    prisma.production.aggregate({
+      where: { ...where, date: { gte: startOfYear(today) } },
+      _sum: { energyKwh: true },
+    }),
     prisma.production.findMany({
-      where: { site: { companyId } },
+      where: { ...where, date: { gte: last30Start, lte: today } },
+      select: { date: true, energyKwh: true },
+    }),
+    prisma.production.findMany({
+      where,
       include: { site: { select: { id: true, name: true } } },
       orderBy: { date: "desc" },
+      skip: skipFor(page),
+      take: PAGE_SIZE,
     }),
+    prisma.production.count({ where }),
     prisma.site.count({ where: { companyId } }),
   ]);
 
-  const sum = (from: Date) =>
-    entries.filter((e) => e.date >= from).reduce((total, e) => total + e.energyKwh, 0);
+  const todayTotal = todayAgg._sum.energyKwh ?? 0;
+  const weekTotal = weekAgg._sum.energyKwh ?? 0;
+  const monthTotal = monthAgg._sum.energyKwh ?? 0;
+  const yearTotal = yearAgg._sum.energyKwh ?? 0;
 
-  const todayTotal = entries
-    .filter((e) => toDateParam(e.date) === toDateParam(today))
-    .reduce((t, e) => t + e.energyKwh, 0);
-  const weekTotal = sum(startOfWeek(today));
-  const monthTotal = sum(startOfMonth(today));
-  const yearTotal = sum(startOfYear(today));
-
-  const last30Start = addDays(today, -29);
   const chartData = Array.from({ length: 30 }, (_, i) => {
     const day = addDays(last30Start, i);
-    const total = entries
+    const total = chartRows
       .filter((e) => toDateParam(e.date) === toDateParam(day))
       .reduce((t, e) => t + e.energyKwh, 0);
     return {
@@ -53,7 +83,7 @@ export default async function ProductionPage() {
     <ListPageShell
       title="Production"
       description="Le suivi de la production d'énergie de vos sites."
-      count={entries.length}
+      count={total}
       addHref="/production/nouveau"
       addLabel="+ Ajouter une production"
       headerExtra={<LinkButton href="/import-export">Importer</LinkButton>}
@@ -77,6 +107,9 @@ export default async function ProductionPage() {
           </LinkButton>
         )
       }
+      page={page}
+      totalPages={totalPagesFor(total)}
+      buildPageHref={(p) => `/production?page=${p}`}
     >
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <StatTile label="Aujourd'hui" value={formatKwh(todayTotal)} />
