@@ -47,6 +47,11 @@ model User {
   passwordHash String
   role         UserRole @default(VIEWER)
 
+  // Protection anti-brute-force : compteur d'échecs consécutifs et verrouillage
+  // temporaire au-delà du seuil (voir src/lib/auth.ts).
+  failedLoginAttempts Int       @default(0)
+  lockedUntil         DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
