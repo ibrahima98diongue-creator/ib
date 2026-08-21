@@ -1,0 +1,424 @@
+// Schema Prisma — GMAO
+// Structure volontairement simple : une entreprise isole ses propres données.
+// Hiérarchie métier : Client -> Site -> Installation -> Équipement.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Multi-entreprise / utilisateurs
+// ---------------------------------------------------------------------------
+
+enum UserRole {
+  ADMIN // gestion complète de l'entreprise
+  MANAGER // gestion des données métier
+  TECHNICIEN // consultation + interventions
+  VIEWER // consultation seule
+}
+
+model Company {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users     User[]
+  clients   Client[]
+  sites     Site[]
+  documents Document[]
+  tasks     Task[]
+
+  @@map("companies")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         UserRole @default(VIEWER)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  documentsUploaded Document[]
+
+  @@index([companyId])
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// Hiérarchie métier : Client -> Site -> Installation -> Équipement
+// ---------------------------------------------------------------------------
+
+model Client {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  name    String
+  contact String?
+  email   String?
+  phone   String?
+  address String?
+
+  sites     Site[]
+  documents Document[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+  @@map("clients")
+}
+
+enum SiteStatus {
+  ACTIF
+  EN_CONSTRUCTION
+  INACTIF
+}
+
+model Site {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  clientId  String
+  client    Client  @relation(fields: [clientId], references: [id], onDelete: Restrict)
+
+  name      String
+  country   String?
+  address   String?
+  latitude  Float?
+  longitude Float?
+  powerKwc  Float?
+  status    SiteStatus @default(ACTIF)
+
+  // Informations avancées
+  commissioningDate DateTime?
+  notes             String?
+
+  installations Installation[]
+  chantiers     Chantier[]
+  maintenances  Maintenance[]
+  nettoyages    Nettoyage[]
+  documents     Document[]
+  productions   Production[]
+  meteoRecords  Meteo[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([clientId])
+  @@map("sites")
+}
+
+model Installation {
+  id     String @id @default(cuid())
+  siteId String
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  name         String
+  type         String?
+  capacityKwc  Float?
+  status       SiteStatus @default(ACTIF)
+
+  // Informations avancées
+  commissioningDate DateTime?
+  notes             String?
+
+  equipements Equipement[]
+  documents   Document[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([siteId])
+  @@map("installations")
+}
+
+enum EquipementStatus {
+  EN_SERVICE
+  EN_MAINTENANCE
+  HORS_SERVICE
+}
+
+model Equipement {
+  id             String       @id @default(cuid())
+  installationId String
+  installation   Installation @relation(fields: [installationId], references: [id], onDelete: Cascade)
+
+  name         String
+  type         String?
+  status       EquipementStatus @default(EN_SERVICE)
+
+  // Informations avancées
+  brand        String?
+  model        String?
+  serialNumber String?
+  installDate  DateTime?
+  notes        String?
+
+  maintenances Maintenance[]
+  documents    Document[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([installationId])
+  @@map("equipements")
+}
+
+// ---------------------------------------------------------------------------
+// Priorité — échelle unique réutilisée partout (chantiers, maintenances, tâches)
+// ---------------------------------------------------------------------------
+
+enum Priority {
+  CRITIQUE
+  HAUTE
+  MOYENNE
+  FAIBLE
+}
+
+// ---------------------------------------------------------------------------
+// Chantiers
+// ---------------------------------------------------------------------------
+
+enum ChantierStatus {
+  A_PLANIFIER
+  PLANIFIE
+  EN_COURS
+  EN_ATTENTE
+  TERMINE
+}
+
+model Chantier {
+  id     String @id @default(cuid())
+  siteId String
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  name        String
+  status      ChantierStatus @default(A_PLANIFIER)
+  priority    Priority       @default(MOYENNE)
+  startDate   DateTime?
+  endDate     DateTime?
+  responsable String?
+
+  // Informations avancées
+  description String?
+  notes       String?
+
+  documents Document[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([siteId])
+  @@map("chantiers")
+}
+
+// ---------------------------------------------------------------------------
+// Maintenance (préventive et corrective)
+// ---------------------------------------------------------------------------
+
+enum MaintenanceType {
+  PREVENTIVE
+  CORRECTIVE
+}
+
+enum MaintenanceStatus {
+  A_PLANIFIER
+  PLANIFIEE
+  EN_COURS
+  EN_ATTENTE
+  TERMINEE
+}
+
+model Maintenance {
+  id           String      @id @default(cuid())
+  siteId       String
+  site         Site        @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  equipementId String?
+  equipement   Equipement? @relation(fields: [equipementId], references: [id], onDelete: SetNull)
+
+  title         String
+  type          MaintenanceType   @default(PREVENTIVE)
+  status        MaintenanceStatus @default(A_PLANIFIER)
+  priority      Priority          @default(MOYENNE)
+  scheduledDate DateTime?
+  responsable   String?
+
+  // Informations avancées
+  description String?
+  notes       String?
+
+  documents Document[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([siteId])
+  @@index([equipementId])
+  @@map("maintenances")
+}
+
+// ---------------------------------------------------------------------------
+// Nettoyage
+// ---------------------------------------------------------------------------
+
+model Nettoyage {
+  id     String @id @default(cuid())
+  siteId String
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  title         String
+  status        ChantierStatus @default(A_PLANIFIER) // mêmes statuts que Chantier (accord masculin)
+  priority      Priority       @default(MOYENNE)
+  scheduledDate DateTime?
+  responsable   String?
+
+  // Informations avancées
+  description String?
+  notes       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([siteId])
+  @@map("nettoyages")
+}
+
+// ---------------------------------------------------------------------------
+// Documents — rattachables à un client, site, installation, équipement,
+// chantier ou maintenance (un seul lien renseigné par document).
+// ---------------------------------------------------------------------------
+
+model Document {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  name        String // nom affiché
+  storedName  String // nom du fichier sur le disque de stockage
+  mimeType    String?
+  size        Int?
+
+  clientId       String?
+  client         Client?       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  siteId         String?
+  site           Site?         @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  installationId String?
+  installation   Installation? @relation(fields: [installationId], references: [id], onDelete: Cascade)
+  equipementId   String?
+  equipement     Equipement?   @relation(fields: [equipementId], references: [id], onDelete: Cascade)
+  chantierId     String?
+  chantier       Chantier?     @relation(fields: [chantierId], references: [id], onDelete: Cascade)
+  maintenanceId  String?
+  maintenance    Maintenance?  @relation(fields: [maintenanceId], references: [id], onDelete: Cascade)
+
+  uploadedById String?
+  uploadedBy   User?   @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId])
+  @@index([clientId])
+  @@index([siteId])
+  @@index([installationId])
+  @@index([equipementId])
+  @@index([chantierId])
+  @@index([maintenanceId])
+  @@map("documents")
+}
+
+// ---------------------------------------------------------------------------
+// Production — un relevé par site et par jour
+// ---------------------------------------------------------------------------
+
+model Production {
+  id     String @id @default(cuid())
+  siteId String
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  date      DateTime @db.Date
+  energyKwh Float
+
+  // Informations avancées
+  notes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([siteId, date])
+  @@index([siteId])
+  @@map("productions")
+}
+
+// ---------------------------------------------------------------------------
+// Météo / Irradiation — un relevé par site et par jour
+// ---------------------------------------------------------------------------
+
+model Meteo {
+  id     String @id @default(cuid())
+  siteId String
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  date          DateTime @db.Date
+  irradiation   Float? // kWh/m²
+  ghi           Float? // Global Horizontal Irradiance (W/m²)
+  dni           Float? // Direct Normal Irradiance (W/m²)
+  dhi           Float? // Diffuse Horizontal Irradiance (W/m²)
+  temperature   Float? // °C
+  windSpeed     Float? // km/h
+  precipitation Float? // mm
+
+  // Informations avancées
+  notes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([siteId, date])
+  @@index([siteId])
+  @@map("meteo_data")
+}
+
+// ---------------------------------------------------------------------------
+// To-Do — volontairement simple : pas de checklist, commentaires ni pièces
+// jointes, pour ne pas transformer la To-Do en outil de gestion de projet.
+// ---------------------------------------------------------------------------
+
+enum TaskStatus {
+  A_FAIRE
+  EN_COURS
+  EN_ATTENTE
+  TERMINEE
+}
+
+model Task {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  title       String
+  assignee    String?
+  dueDate     DateTime?  @db.Date
+  priority    Priority   @default(MOYENNE)
+  status      TaskStatus @default(A_FAIRE)
+  description String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+  @@map("tasks")
+}
