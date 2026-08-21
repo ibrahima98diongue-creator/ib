@@ -5,16 +5,27 @@ import { LinkButton } from "@/components/ui/Button";
 import { Table, Thead, Th, Tbody, Td } from "@/components/ui/Table";
 import { Badge } from "@/components/ui/Badge";
 import { siteStatusLabels } from "@/lib/labels";
+import { PAGE_SIZE, parsePage, skipFor, totalPagesFor } from "@/lib/pagination";
 import Link from "next/link";
 
-export default async function SitesPage() {
+export default async function SitesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
+  const { page: pageParam } = await searchParams;
+  const page = parsePage(pageParam);
   const session = await auth();
-  const [sites, hasClients] = await Promise.all([
+  const where = { companyId: session!.user.companyId };
+  const [sites, total, hasClients] = await Promise.all([
     prisma.site.findMany({
-      where: { companyId: session!.user.companyId },
+      where,
       include: { client: { select: { name: true } } },
       orderBy: { name: "asc" },
+      skip: skipFor(page),
+      take: PAGE_SIZE,
     }),
+    prisma.site.count({ where }),
     prisma.client.count({ where: { companyId: session!.user.companyId } }),
   ]);
 
@@ -22,7 +33,7 @@ export default async function SitesPage() {
     <ListPageShell
       title="Sites"
       description="Les sites de production rattachés à vos clients."
-      count={sites.length}
+      count={total}
       addHref="/sites/nouveau"
       addLabel="+ Ajouter un site"
       emptyTitle="Aucun site"
@@ -40,6 +51,9 @@ export default async function SitesPage() {
           </LinkButton>
         )
       }
+      page={page}
+      totalPages={totalPagesFor(total)}
+      buildPageHref={(p) => `/sites?page=${p}`}
     >
       <Table>
         <Thead>

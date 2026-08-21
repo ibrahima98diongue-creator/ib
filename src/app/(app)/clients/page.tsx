@@ -3,21 +3,34 @@ import { prisma } from "@/lib/prisma";
 import { ListPageShell } from "@/components/ListPageShell";
 import { LinkButton } from "@/components/ui/Button";
 import { Table, Thead, Th, Tbody, Td } from "@/components/ui/Table";
+import { PAGE_SIZE, parsePage, skipFor, totalPagesFor } from "@/lib/pagination";
 import Link from "next/link";
 
-export default async function ClientsPage() {
+export default async function ClientsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
+  const { page: pageParam } = await searchParams;
+  const page = parsePage(pageParam);
   const session = await auth();
-  const clients = await prisma.client.findMany({
-    where: { companyId: session!.user.companyId },
-    include: { _count: { select: { sites: true } } },
-    orderBy: { name: "asc" },
-  });
+  const where = { companyId: session!.user.companyId };
+  const [clients, total] = await Promise.all([
+    prisma.client.findMany({
+      where,
+      include: { _count: { select: { sites: true } } },
+      orderBy: { name: "asc" },
+      skip: skipFor(page),
+      take: PAGE_SIZE,
+    }),
+    prisma.client.count({ where }),
+  ]);
 
   return (
     <ListPageShell
       title="Clients"
       description="Les clients pour lesquels vous exploitez des sites."
-      count={clients.length}
+      count={total}
       addHref="/clients/nouveau"
       addLabel="+ Ajouter un client"
       emptyTitle="Aucun client"
@@ -27,6 +40,9 @@ export default async function ClientsPage() {
           + Ajouter un client
         </LinkButton>
       }
+      page={page}
+      totalPages={totalPagesFor(total)}
+      buildPageHref={(p) => `/clients?page=${p}`}
     >
       <Table>
         <Thead>
