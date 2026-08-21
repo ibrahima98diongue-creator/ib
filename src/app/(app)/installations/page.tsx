@@ -5,16 +5,27 @@ import { LinkButton } from "@/components/ui/Button";
 import { Table, Thead, Th, Tbody, Td } from "@/components/ui/Table";
 import { Badge } from "@/components/ui/Badge";
 import { siteStatusLabels } from "@/lib/labels";
+import { PAGE_SIZE, parsePage, skipFor, totalPagesFor } from "@/lib/pagination";
 import Link from "next/link";
 
-export default async function InstallationsPage() {
+export default async function InstallationsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
+  const { page: pageParam } = await searchParams;
+  const page = parsePage(pageParam);
   const session = await auth();
-  const [installations, hasSites] = await Promise.all([
+  const where = { site: { companyId: session!.user.companyId } };
+  const [installations, total, hasSites] = await Promise.all([
     prisma.installation.findMany({
-      where: { site: { companyId: session!.user.companyId } },
+      where,
       include: { site: { select: { id: true, name: true } } },
       orderBy: { name: "asc" },
+      skip: skipFor(page),
+      take: PAGE_SIZE,
     }),
+    prisma.installation.count({ where }),
     prisma.site.count({ where: { companyId: session!.user.companyId } }),
   ]);
 
@@ -22,7 +33,7 @@ export default async function InstallationsPage() {
     <ListPageShell
       title="Installations"
       description="Les installations photovoltaïques rattachées à vos sites."
-      count={installations.length}
+      count={total}
       addHref="/installations/nouveau"
       addLabel="+ Ajouter une installation"
       emptyTitle="Aucune installation"
@@ -42,6 +53,9 @@ export default async function InstallationsPage() {
           </LinkButton>
         )
       }
+      page={page}
+      totalPages={totalPagesFor(total)}
+      buildPageHref={(p) => `/installations?page=${p}`}
     >
       <Table>
         <Thead>

@@ -5,15 +5,26 @@ import { LinkButton } from "@/components/ui/Button";
 import { InterventionsTable } from "@/components/InterventionsSection";
 import { maintenanceStatusLabels, priorityLabels, maintenanceTypeLabels } from "@/lib/labels";
 import { formatDate } from "@/lib/format";
+import { PAGE_SIZE, parsePage, skipFor, totalPagesFor } from "@/lib/pagination";
 
-export default async function MaintenancePage() {
+export default async function MaintenancePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
+  const { page: pageParam } = await searchParams;
+  const page = parsePage(pageParam);
   const session = await auth();
-  const [maintenances, hasSites] = await Promise.all([
+  const where = { site: { companyId: session!.user.companyId } };
+  const [maintenances, total, hasSites] = await Promise.all([
     prisma.maintenance.findMany({
-      where: { site: { companyId: session!.user.companyId } },
+      where,
       include: { site: { select: { id: true, name: true } } },
       orderBy: [{ scheduledDate: "asc" }, { title: "asc" }],
+      skip: skipFor(page),
+      take: PAGE_SIZE,
     }),
+    prisma.maintenance.count({ where }),
     prisma.site.count({ where: { companyId: session!.user.companyId } }),
   ]);
 
@@ -21,7 +32,7 @@ export default async function MaintenancePage() {
     <ListPageShell
       title="Maintenance"
       description="Les interventions de maintenance préventive et corrective."
-      count={maintenances.length}
+      count={total}
       addHref="/maintenance/nouveau"
       addLabel="+ Ajouter une maintenance"
       emptyTitle="Aucune maintenance"
@@ -41,6 +52,9 @@ export default async function MaintenancePage() {
           </LinkButton>
         )
       }
+      page={page}
+      totalPages={totalPagesFor(total)}
+      buildPageHref={(p) => `/maintenance?page=${p}`}
     >
       <InterventionsTable
         items={maintenances.map((m) => ({

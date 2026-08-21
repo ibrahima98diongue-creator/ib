@@ -5,16 +5,27 @@ import { LinkButton } from "@/components/ui/Button";
 import { Table, Thead, Th, Tbody, Td } from "@/components/ui/Table";
 import { Badge } from "@/components/ui/Badge";
 import { equipementStatusLabels } from "@/lib/labels";
+import { PAGE_SIZE, parsePage, skipFor, totalPagesFor } from "@/lib/pagination";
 import Link from "next/link";
 
-export default async function EquipementsPage() {
+export default async function EquipementsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
+  const { page: pageParam } = await searchParams;
+  const page = parsePage(pageParam);
   const session = await auth();
-  const [equipements, hasInstallations] = await Promise.all([
+  const where = { installation: { site: { companyId: session!.user.companyId } } };
+  const [equipements, total, hasInstallations] = await Promise.all([
     prisma.equipement.findMany({
-      where: { installation: { site: { companyId: session!.user.companyId } } },
+      where,
       include: { installation: { select: { id: true, name: true } } },
       orderBy: { name: "asc" },
+      skip: skipFor(page),
+      take: PAGE_SIZE,
     }),
+    prisma.equipement.count({ where }),
     prisma.installation.count({ where: { site: { companyId: session!.user.companyId } } }),
   ]);
 
@@ -22,7 +33,7 @@ export default async function EquipementsPage() {
     <ListPageShell
       title="Équipements"
       description="Les équipements rattachés à vos installations."
-      count={equipements.length}
+      count={total}
       addHref="/equipements/nouveau"
       addLabel="+ Ajouter un équipement"
       emptyTitle="Aucun équipement"
@@ -42,6 +53,9 @@ export default async function EquipementsPage() {
           </LinkButton>
         )
       }
+      page={page}
+      totalPages={totalPagesFor(total)}
+      buildPageHref={(p) => `/equipements?page=${p}`}
     >
       <Table>
         <Thead>

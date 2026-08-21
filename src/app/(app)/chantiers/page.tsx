@@ -5,15 +5,26 @@ import { LinkButton } from "@/components/ui/Button";
 import { InterventionsTable } from "@/components/InterventionsSection";
 import { chantierStatusLabels, priorityLabels } from "@/lib/labels";
 import { formatDate } from "@/lib/format";
+import { PAGE_SIZE, parsePage, skipFor, totalPagesFor } from "@/lib/pagination";
 
-export default async function ChantiersPage() {
+export default async function ChantiersPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
+  const { page: pageParam } = await searchParams;
+  const page = parsePage(pageParam);
   const session = await auth();
-  const [chantiers, hasSites] = await Promise.all([
+  const where = { site: { companyId: session!.user.companyId } };
+  const [chantiers, total, hasSites] = await Promise.all([
     prisma.chantier.findMany({
-      where: { site: { companyId: session!.user.companyId } },
+      where,
       include: { site: { select: { id: true, name: true } } },
       orderBy: [{ startDate: "asc" }, { name: "asc" }],
+      skip: skipFor(page),
+      take: PAGE_SIZE,
     }),
+    prisma.chantier.count({ where }),
     prisma.site.count({ where: { companyId: session!.user.companyId } }),
   ]);
 
@@ -21,7 +32,7 @@ export default async function ChantiersPage() {
     <ListPageShell
       title="Chantiers"
       description="Les chantiers en cours ou à venir sur vos sites."
-      count={chantiers.length}
+      count={total}
       addHref="/chantiers/nouveau"
       addLabel="+ Ajouter un chantier"
       emptyTitle="Aucun chantier"
@@ -39,6 +50,9 @@ export default async function ChantiersPage() {
           </LinkButton>
         )
       }
+      page={page}
+      totalPages={totalPagesFor(total)}
+      buildPageHref={(p) => `/chantiers?page=${p}`}
     >
       <InterventionsTable
         items={chantiers.map((c) => ({
